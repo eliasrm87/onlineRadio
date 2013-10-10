@@ -1,0 +1,155 @@
+#! /bin/bash
+
+#Filtro de wirshark para averiguar versión del stream: http.request.uri matches "livestream"
+
+
+function usage() {
+   echo ""
+   echo "Nombre:"
+   echo "   radio - Reproduce radio streaming proporcionado por streamtheworld.com y otros"
+   echo ""
+   echo ""
+   echo "Synopsis:"
+   echo "   radio [-f] [-v] [-h] -m RADIO"
+   echo ""
+   echo ""
+   echo "Opciones:"
+   echo "   -m RADIO"
+   echo "        Especifica el nombre de la radio que se desea oir."
+   echo ""
+   echo "   -f   Selecciona un el servidor más rápido basandose en el tiempo de ping"
+   echo "   -v   Muestra mas información."
+   echo "   -k   Termina el proceso de reproducción actual"
+   echo "   -h   Muestra esta información."
+   echo ""
+   echo ""
+   echo "Ejemplos:"
+   echo "   radio -m CADENASER -f"
+   echo "        Reproduce la radio CADENASER usando el servidor con menor ping."
+   echo ""
+   echo "   radio -m M80RADIO"
+   echo "        Reproduce la radio M80RADIO usando un servidor aleatorio."
+   echo ""
+   echo "   radio -m LOS40 -v"
+   echo "        Reproduce la radio LOS40 usando el servidor con menor ping, además informa" 
+   echo "        de los servidores disponibles y su ping."
+}
+
+
+Fast=true
+Verbose=false
+Alias=true
+Kill=false
+MOUNT=""
+
+while getopts ":m:fvk" opt; do
+  case $opt in
+    m)
+      MOUNT=$OPTARG
+    ;;
+    f)
+      Fast=false
+    ;;
+    v)
+      Verbose=true
+    ;;
+    k)
+      Kill=true
+    ;;
+    \?)
+      usage
+      exit
+    ;;
+  esac
+done
+
+kill -9 `cat /tmp/radio.pid 2> /dev/null` 2> /dev/null
+rm /tmp/radio.pid 2> /dev/null
+if [ $Kill == true ]; then
+  exit
+fi
+
+if [[ $MOUNT == "" ]]; then
+   usage
+   exit
+fi
+
+while [ $Alias == true ]; do
+   echo "Conectando con streamtheworld.com ..."
+   XML=$(wget -qO- "http://playerservices.streamtheworld.com/api/livestream?version=1.2&mount=$MOUNT&lang=en")
+   IPs=$(echo "$XML" | sed -n -e 's/.*<ip>\(.*\)<\/ip>.*/\1/p' -e 's/.*<port>\(.*\)<\/port>.*/\1/p')
+   lista=( $IPs )
+   IPn=0
+
+   echo "Buscando servidores para $MOUNT..."
+   for (( i=0; i<${#lista[@]}; i++ )); do
+      if [[ ${lista[$i]} == *.*.*.* ]]; then
+         ip=${lista[$i]}
+      fi
+      if [[ ${lista[$i]} != *.*.*.* ]]; then
+         IP[$IPn]=$ip:${lista[$i]}
+         IPn=`expr $IPn + 1`
+      fi
+   done;
+
+   if (( ${#IP[@]} == 0 )); then
+      echo "Atención: No se ha podido encontrar en streamtheworld.com una radio bajo el nombre \"$MOUNT\"."
+      echo "Buscando en la lista de otras radios conocidas..."
+      Encontrada=false
+      while read line; do
+         if (( $(echo $line | grep -c $MOUNT) > 0 )); then
+            Encontrada=true
+            if (( $(echo $line | grep -c "streamtheworld://") > 0 )); then
+               echo "Parece que esta radio está en streamtheworld.com bajo el nombre \"$(echo $line | cut -d "/" -f 3)\""
+               MOUNT=$(echo $line | cut -d "/" -f 3)
+            else
+               echo "Reproduciendo..."
+               if (( $(echo $line | grep -c "rtmp://") > 0 )); then
+                  rtmpdump -vq -r "$(echo $line | cut -d " " -f2)" 2> /dev/null | mplayer -loop 0 - & > /dev/null 2> /dev/null
+               else
+                  mplayer -prefer-ipv4 -loop 0 "$(echo $line | cut -d " " -f2)" & > /dev/null 2> /dev/null
+               fi
+               echo $! > /tmp/radio.pid
+               exit
+            fi
+         fi 
+      done <~/.radio.list
+      if [ $Encontrada == false ]; then
+         echo "Error: No se ha podido encontrar un origen para reproducir la radio $MOUNT"
+         exit
+      fi
+   else
+      Alias=false
+   fi
+done
+
+mintime=1000000
+MINi=0
+if [ $Fast == true ]; then
+   echo "Seleccionando servidor aleatorio..."
+   MINi=$[ ( $RANDOM % ${#IP[@]} ) ]
+   mintime=$(ping -qc 2 $ip | awk -F/ '/^rtt/ { print $5 }' | tr -d ".")
+else
+   echo "Seleccionando servidor con menor ping..."
+   for (( i=0; i<${#IP[@]}; i++ )); do
+      PING=$(ping -qc 2 $(echo ${IP[$i]} | cut -d ":" -f 1) | awk -F/ '/^rtt/ { print $5 }' | tr -d ".")
+      if [ $Verbose == true ]; then
+         echo "   ${IP[$i]} ping=$PINGµs"
+      fi
+      if [[ $PING != "" ]]; then
+         if (( $PING < $mintime )); then
+            MINi=$i
+            mintime=$PING
+         fi
+      else
+         echo "   Atención: No se ha obtenio respuesta de ${IP[$i]}"
+      fi
+      IPn=`expr $IPn + 1`
+   done;
+fi
+
+echo "Se ha selecciodo el servidor ${IP[$MINi]} ping=$mintimeµs"
+echo "Reproduciendo..."
+mplayer -prefer-ipv4 -loop 0 "http://${IP[$MINi]}/$MOUNT" & > /dev/null 2> /dev/null
+echo $! > /tmp/radio.pid
+exit
