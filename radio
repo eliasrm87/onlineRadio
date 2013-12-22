@@ -6,7 +6,8 @@
 function usage() {
    echo ""
    echo "Nombre:"
-   echo "   radio - Reproduce radio streaming proporcionado por streamtheworld.com y otros"
+   echo "   radio - Reproduce radio streaming proporcionado por streamtheworld.com, "
+   echo "           Digitaly Imported Radio y otros"
    echo ""
    echo ""
    echo "Synopsis:"
@@ -93,14 +94,22 @@ while [ $Alias == true ]; do
    done;
 
    if (( ${#IP[@]} == 0 )); then
-      echo "Atención: No se ha podido encontrar en streamtheworld.com una radio bajo el nombre \"$MOUNT\"."
+      echo "Atención: No se ha podido encontrar en streamtheworld.com una radio con el nombre \"$MOUNT\"."
+      echo "Buscando en Digitaly Imported Radio..."
+      url=$(curl http://listen.di.fm/public3 2> /dev/null | tr '{' "\n" | grep "\/$MOUNT\.pls")
+      if [ $(echo $url | grep -c "pls") -ne 0 ]; then
+         mplayer -prefer-ipv4 -loop 0  -playlist  $(echo $url | cut -d '"' -f18 | sed 's/\\\//\//g') & > /dev/null 2> /dev/null
+         echo $! > /tmp/radio.pid
+         exit
+      fi
+      echo "Atención: No se ha podido encontrar en Digitaly Imported Radio una radio con el nombre \"$MOUNT\"."
       echo "Buscando en la lista de otras radios conocidas..."
       Encontrada=false
       while read line; do
          if (( $(echo $line | grep -c $MOUNT) > 0 )); then
             Encontrada=true
             if (( $(echo $line | grep -c "streamtheworld://") > 0 )); then
-               echo "Parece que esta radio está en streamtheworld.com bajo el nombre \"$(echo $line | cut -d "/" -f 3)\""
+               echo "Parece que esta radio está en streamtheworld.com con el nombre \"$(echo $line | cut -d "/" -f 3)\""
                MOUNT=$(echo $line | cut -d "/" -f 3)
             else
                echo "Reproduciendo..."
