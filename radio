@@ -11,7 +11,7 @@ function usage() {
    echo ""
    echo ""
    echo "Synopsis:"
-   echo "   radio [-f] [-v] [-h] -m RADIO"
+   echo "   radio [-f] [-v] [-k] -m RADIO"
    echo ""
    echo ""
    echo "Opciones:"
@@ -21,7 +21,7 @@ function usage() {
    echo "   -f   Selecciona un el servidor más rápido basandose en el tiempo de ping"
    echo "   -v   Muestra mas información."
    echo "   -k   Termina el proceso de reproducción actual"
-   echo "   -h   Muestra esta información."
+   echo "   -l   Muestra listado de algunas de las radios disponibles"
    echo ""
    echo ""
    echo "Ejemplos:"
@@ -36,6 +36,12 @@ function usage() {
    echo "        de los servidores disponibles y su ping."
 }
 
+function listRadios() {
+   echo "Digitaly Imported Radio:"
+   while read -r line; do
+      printf "   %-26s: %s\n" "$(echo $line | cut -d '"' -f10)" "$(echo $line | cut -d '"' -f6)"
+   done <<< "$(curl http://listen.di.fm/public3 2> /dev/null | tr '{' "\n" | tail -n +2)"
+}
 
 Fast=true
 Verbose=false
@@ -43,7 +49,7 @@ Alias=true
 Kill=false
 MOUNT=""
 
-while getopts ":m:fvk" opt; do
+while getopts ":m:fvkl" opt; do
   case $opt in
     m)
       MOUNT=$OPTARG
@@ -56,6 +62,10 @@ while getopts ":m:fvk" opt; do
     ;;
     k)
       Kill=true
+    ;;
+    l)
+      listRadios
+      exit
     ;;
     \?)
       usage
@@ -98,7 +108,8 @@ while [ $Alias == true ]; do
       echo "Buscando en Digitaly Imported Radio..."
       url=$(curl http://listen.di.fm/public3 2> /dev/null | tr '{' "\n" | grep "\/$MOUNT\.pls")
       if [ $(echo $url | grep -c "pls") -ne 0 ]; then
-         mplayer -prefer-ipv4 -loop 0  -playlist  $(echo $url | cut -d '"' -f18 | sed 's/\\\//\//g') & > /dev/null 2> /dev/null
+         echo "Reproduciendo..."
+         mplayer -prefer-ipv4 -loop 0  -playlist  $(echo $url | cut -d '"' -f14 | sed 's/\\\//\//g') > /dev/null 2> /dev/null &
          echo $! > /tmp/radio.pid
          exit
       fi
@@ -114,15 +125,15 @@ while [ $Alias == true ]; do
             else
                echo "Reproduciendo..."
                if (( $(echo $line | grep -c "rtmp://") > 0 )); then
-                  rtmpdump -vq -r "$(echo $line | cut -d " " -f2)" 2> /dev/null | mplayer -loop 0 - & > /dev/null 2> /dev/null
+                  rtmpdump -vq -r "$(echo $line | cut -d " " -f2)" 2> /dev/null | mplayer -loop 0 - > /dev/null 2> /dev/null &
                else
-                  mplayer -prefer-ipv4 -loop 0 "$(echo $line | cut -d " " -f2)" & > /dev/null 2> /dev/null
+                  mplayer -prefer-ipv4 -loop 0 "$(echo $line | cut -d " " -f2)" > /dev/null 2> /dev/null &
                fi
                echo $! > /tmp/radio.pid
                exit
             fi
          fi 
-      done <~/.radio.list
+      done <<< "$(curl https://raw.githubusercontent.com/erm2587/onlineRadio/master/radios.list 2> /dev/null)"
       if [ $Encontrada == false ]; then
          echo "Error: No se ha podido encontrar un origen para reproducir la radio $MOUNT"
          exit
@@ -159,6 +170,6 @@ fi
 
 echo "Se ha selecciodo el servidor ${IP[$MINi]} ping=$mintimeµs"
 echo "Reproduciendo..."
-mplayer -prefer-ipv4 -loop 0 "http://${IP[$MINi]}/$MOUNT" & > /dev/null 2> /dev/null
+mplayer -prefer-ipv4 -loop 0 "http://${IP[$MINi]}/$MOUNT" > /dev/null 2> /dev/null &
 echo $! > /tmp/radio.pid
 exit
